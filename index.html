@@ -71,14 +71,14 @@ body{background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:
   <header class="masthead">
     <span class="eyebrow">local · in-browser</span>
     <h1>差分ビューア<span class="dot">.</span></h1>
-    <p class="sub">Access・Excel・Word の2ファイルをブラウザ内で比較（外部送信なし）</p>
+    <p class="sub">Access・Excel・Word をブラウザ内で閲覧・比較（1ファイルならビュワー、2ファイルなら差分比較・外部送信なし）</p>
   </header>
 
   <div class="grid">
     <a class="card access" href="access-diff.html">
       <span class="ico">DB</span>
       <h2>Access 差分</h2>
-      <p class="desc">2つのDBの同名テーブルを、複合キーで行対応付けしてセル単位に比較。追加・削除・変更を色分け表示。</p>
+      <p class="desc">1つならテーブルをそのまま閲覧、2つなら複合キーで行対応付けしてセル単位に比較。追加・削除・変更を色分け表示。</p>
       <div class="formats"><span class="fmt">.mdb</span><span class="fmt">.accdb</span></div>
       <span class="go">開く <span class="arw">&#8594;</span></span>
     </a>
@@ -86,7 +86,7 @@ body{background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:
     <a class="card excel" href="excel-diff.html">
       <span class="ico">XL</span>
       <h2>Excel 差分</h2>
-      <p class="desc">2つのブックを同名シートごとに、セル位置基準（A1, B2 …）で比較。シートはタブで切り替え。</p>
+      <p class="desc">1つならシートをそのまま閲覧、2つなら同名シートごとにセル位置基準（A1, B2 …）で比較。シートはタブで切り替え。</p>
       <div class="formats"><span class="fmt">.xlsx</span><span class="fmt">.xls</span><span class="fmt">.xlsm</span></div>
       <span class="go">開く <span class="arw">&#8594;</span></span>
     </a>
@@ -94,7 +94,7 @@ body{background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:
     <a class="card word" href="word-diff.html">
       <span class="ico">W</span>
       <h2>Word 差分</h2>
-      <p class="desc">2つの文書の本文を段落・語単位で比較。インライン／左右並列で表示し、変更箇所を強調。</p>
+      <p class="desc">1つなら本文をそのまま閲覧、2つなら段落・語単位で比較。インライン／左右並列で表示し、変更箇所を強調。</p>
       <div class="formats"><span class="fmt">.docx</span></div>
       <span class="go">開く <span class="arw">&#8594;</span></span>
     </a>
