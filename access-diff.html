@@ -91,6 +91,7 @@ select:focus-visible, button:focus-visible, .drop:focus-visible{outline:2px soli
   border-radius:8px; box-shadow:0 8px 22px rgba(20,30,45,.14); padding:6px; min-width:210px; max-height:280px; overflow:auto;
 }
 .pop.hidden{display:none}
+.hidden{display:none}
 .pop .hd{font-size:11px; color:var(--muted); padding:4px 8px 6px}
 .pop label{display:flex; align-items:center; gap:9px; padding:6px 8px; border-radius:6px; font-family:var(--mono); font-size:12.5px; cursor:pointer}
 .pop label:hover{background:var(--accent-soft)}
@@ -238,7 +239,7 @@ td.c-uncmp{color:var(--muted)}
 
   <header class="masthead">
     <h1>Access 差分ビューア<span class="dot">.</span></h1>
-    <span class="sub">2つの .mdb / .accdb を突き合わせて同名テーブルを比較</span>
+    <span class="sub">1つならビュワー、2つなら .mdb / .accdb を突き合わせて同名テーブルを比較</span>
     <nav class="nav">
       <a href="access-diff.html" class="here">Access</a>
       <a href="excel-diff.html">Excel</a>
@@ -264,10 +265,10 @@ td.c-uncmp{color:var(--muted)}
 
     <div class="row2">
       <div class="field">
-        <label for="tableSel">テーブル（同名）</label>
-        <select id="tableSel" disabled><option>— 2ファイルを読み込んでください —</option></select>
+        <label for="tableSel" id="tableSelLabel">テーブル（同名）</label>
+        <select id="tableSel" disabled><option>— ファイルを読み込んでください —</option></select>
       </div>
-      <div class="field">
+      <div class="field" id="keyField">
         <label>キー列（複合可・順序＝選択順）</label>
         <div class="multi" id="keyMulti">
           <button class="multibtn" id="keyBtn" type="button" disabled>キー列を選択… <span class="caret">&#9662;</span></button>
@@ -288,7 +289,7 @@ td.c-uncmp{color:var(--muted)}
           <option value="a4p">A4 縦</option>
         </select>
       </div>
-      <label class="check"><input type="checkbox" id="diffOnly"> 差分のみ表示</label>
+      <label class="check" id="diffOnlyRow"><input type="checkbox" id="diffOnly"> 差分のみ表示</label>
       <div class="spacer"></div>
       <button class="pdf" id="pdfBtn" type="button" disabled>PDF出力</button>
     </div>
@@ -315,7 +316,7 @@ td.c-uncmp{color:var(--muted)}
   <div class="warn hidden" id="warn"></div>
 
   <div class="tablehost" id="tableHost">
-    <div class="empty">2つのファイルを読み込み、テーブルを選ぶと差分が表示されます。</div>
+    <div class="empty">ファイルを読み込み、テーブルを選ぶと内容が表示されます。</div>
   </div>
 
   <p class="footnote">
@@ -363,6 +364,15 @@ td.c-uncmp{color:var(--muted)}
   var pending = null; // Cookie復元用（ファイル読込後に適用）
 
   var $ = function (id) { return document.getElementById(id); };
+  function effA() { return state.A || state.B; }
+  function effB() { return state.B || state.A; }
+  function isSingle() { return !!(state.A || state.B) && !(state.A && state.B); }
+  function updateModeUI() {
+    var single = isSingle();
+    $("keyField").classList.toggle("hidden", single);
+    $("diffOnlyRow").classList.toggle("hidden", single);
+    $("tableSelLabel").textContent = single ? "テーブル" : "テーブル（同名）";
+  }
 
   /* ---------- 設定の保存 / 復元（Cookie + localStorage 保険） ---------- */
   function saveSettings() {
@@ -449,17 +459,18 @@ td.c-uncmp{color:var(--muted)}
 
   /* ---------- 共通テーブル／列 ---------- */
   function refreshTableChoices() {
+    updateModeUI();
     var sel = $("tableSel"), prev = state.table;
     sel.innerHTML = "";
-    if (!state.A || !state.B) {
+    if (!state.A && !state.B) {
       sel.disabled = true;
-      addOpt(sel, "", "— 2ファイルを読み込んでください —");
+      addOpt(sel, "", "— ファイルを読み込んでください —");
       state.table = null; resetColControls(); clearResult(); return;
     }
-    var common = intersect(state.A.tables, state.B.tables);
+    var common = intersect(effA().tables, effB().tables);
     if (common.length === 0) {
       sel.disabled = true;
-      addOpt(sel, "", "— 同名テーブルがありません —");
+      addOpt(sel, "", isSingle() ? "— テーブルがありません —" : "— 同名テーブルがありません —");
       state.table = null; resetColControls(); clearResult(); return;
     }
     sel.disabled = false;
@@ -474,8 +485,8 @@ td.c-uncmp{color:var(--muted)}
 
   function commonColumns() {
     if (!state.table) return { common: [], onlyA: [], onlyB: [], all: [] };
-    var ca = state.A.reader.getTable(state.table).getColumnNames();
-    var cb = state.B.reader.getTable(state.table).getColumnNames();
+    var ca = effA().reader.getTable(state.table).getColumnNames();
+    var cb = effB().reader.getTable(state.table).getColumnNames();
     var setB = {}, setA = {};
     cb.forEach(function (c) { setB[c] = true; });
     ca.forEach(function (c) { setA[c] = true; });
@@ -576,8 +587,8 @@ td.c-uncmp{color:var(--muted)}
     var keyCols = state.keyCols;
     var cmpCols = cols.common.filter(function (c) { return keyCols.indexOf(c) < 0; }); // 比較対象＝共通列−キー列
 
-    var dataA = state.A.reader.getTable(state.table).getData();
-    var dataB = state.B.reader.getTable(state.table).getData();
+    var dataA = effA().reader.getTable(state.table).getData();
+    var dataB = effB().reader.getTable(state.table).getData();
     var mapA = groupByKey(dataA), mapB = groupByKey(dataB);
 
     var order = [], seen = {};
@@ -601,7 +612,7 @@ td.c-uncmp{color:var(--muted)}
         else { rows.push({ status: "added", a: null, b: b, changed: {} }); counts.added++; }
       }
     });
-    state.result = { rows: rows, counts: counts, cols: cols, dupWarn: hasDup(mapA) || hasDup(mapB) };
+    state.result = { rows: rows, counts: counts, cols: cols, dupWarn: hasDup(mapA) || hasDup(mapB), single: isSingle() };
     render();
   }
   function groupByKey(data) {
@@ -641,27 +652,34 @@ td.c-uncmp{color:var(--muted)}
   function render() {
     if (!state.result) return;
     var c = state.result.counts;
-    $("sumSame").textContent = c.same; $("sumAdd").textContent = c.added;
-    $("sumRem").textContent = c.removed; $("sumChg").textContent = c.changed;
-    $("summary").classList.remove("hidden");
+    var single = state.result.single;
+    if (single) {
+      $("summary").classList.add("hidden");
+    } else {
+      $("sumSame").textContent = c.same; $("sumAdd").textContent = c.added;
+      $("sumRem").textContent = c.removed; $("sumChg").textContent = c.changed;
+      $("summary").classList.remove("hidden");
+    }
 
     $("phA").textContent = state.A ? state.A.name : "";
     $("phB").textContent = state.B ? state.B.name : "";
     $("phTable").textContent = state.table || "";
-    $("phKey").textContent = state.keyCols.join(" + ");
-    $("phCounts").textContent = "一致 " + c.same + " / 追加 " + c.added + " / 削除 " + c.removed + " / 変更 " + c.changed;
+    $("phKey").textContent = single ? "" : state.keyCols.join(" + ");
+    $("phCounts").textContent = single ? "" : ("一致 " + c.same + " / 追加 " + c.added + " / 削除 " + c.removed + " / 変更 " + c.changed);
     $("phTime").textContent = new Date().toLocaleString("ja-JP");
 
     var cols = state.result.cols;
     var warn = $("warn"), msgs = [];
-    if (cols.onlyA.length) msgs.push("A のみの列: " + cols.onlyA.join(", "));
-    if (cols.onlyB.length) msgs.push("B のみの列: " + cols.onlyB.join(", "));
-    if (state.result.dupWarn) msgs.push("キーに重複があります（同キーは出現順で対応付け）。");
+    if (!single) {
+      if (cols.onlyA.length) msgs.push("A のみの列: " + cols.onlyA.join(", "));
+      if (cols.onlyB.length) msgs.push("B のみの列: " + cols.onlyB.join(", "));
+      if (state.result.dupWarn) msgs.push("キーに重複があります（同キーは出現順で対応付け）。");
+    }
     if (msgs.length) { warn.innerHTML = msgs.map(escapeHtml).join(" &nbsp;/&nbsp; "); warn.classList.remove("hidden"); }
     else warn.classList.add("hidden");
 
     var rows = sortedRows();
-    if (state.diffOnly) rows = rows.filter(function (r) { return r.status !== "same"; });
+    if (!single && state.diffOnly) rows = rows.filter(function (r) { return r.status !== "same"; });
     var CAP = 6000, capped = rows.length > CAP, shown = capped ? rows.slice(0, CAP) : rows;
     var isKey = {}; state.keyCols.forEach(function (c) { isKey[c] = true; });
 
@@ -695,7 +713,7 @@ td.c-uncmp{color:var(--muted)}
     var host = $("tableHost");
     if (shown.length === 0) {
       host.innerHTML = "<div class=\"empty\">" +
-        (state.diffOnly ? "差分はありません。すべての行が一致しています。" : "表示する行がありません。") + "</div>";
+        (!single && state.diffOnly ? "差分はありません。すべての行が一致しています。" : "表示する行がありません。") + "</div>";
     } else {
       host.innerHTML = "<table id=\"difftable\"><thead>" + thead + "</thead><tbody>" + frag.join("") + "</tbody></table>" +
         (capped ? "<div class=\"capnote\">先頭 " + CAP + " 行のみ表示（全 " + rows.length + " 行）。PDF出力も表示分のみになります。</div>" : "");
@@ -728,7 +746,7 @@ td.c-uncmp{color:var(--muted)}
     state.result = null;
     $("summary").classList.add("hidden");
     $("warn").classList.add("hidden");
-    $("tableHost").innerHTML = "<div class=\"empty\">テーブルを選ぶと差分が表示されます。</div>";
+    $("tableHost").innerHTML = "<div class=\"empty\">テーブルを選ぶと内容が表示されます。</div>";
     $("pdfBtn").disabled = true;
   }
 
