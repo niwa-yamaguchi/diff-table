@@ -58,6 +58,7 @@ select:focus-visible,button:focus-visible,.drop:focus-visible{outline:2px solid 
 
 .summary{display:flex; gap:10px; flex-wrap:wrap; margin:16px 0 4px}
 .summary.hidden{display:none}
+.hidden{display:none}
 .chip{display:flex; align-items:baseline; gap:8px; border:1px solid var(--line); border-radius:8px; padding:8px 13px; background:var(--panel)}
 .chip .n{font-family:var(--mono); font-size:18px; font-weight:700; line-height:1}
 .chip .l{font-size:11px; color:var(--muted)}
@@ -131,7 +132,7 @@ table#sidedoc{border-collapse:collapse; width:100%; table-layout:fixed; font-fam
 <div class="wrap">
   <header class="masthead">
     <h1>Word 差分ビューア<span class="dot">.</span></h1>
-    <span class="sub">2つの .docx をそのまま比較</span>
+    <span class="sub">1つならビュワー、2つなら .docx を比較</span>
     <nav class="nav">
       <a href="access-diff.html">Access</a>
       <a href="excel-diff.html">Excel</a>
@@ -154,11 +155,11 @@ table#sidedoc{border-collapse:collapse; width:100%; table-layout:fixed; font-fam
     </div>
 
     <div class="row2">
-      <div class="field">
+      <div class="field" id="modeField">
         <label for="modeSel">表示</label>
         <select id="modeSel"><option value="inline">インライン</option><option value="side">左右並列</option></select>
       </div>
-      <label class="check"><input type="checkbox" id="collapse"> 一致部分を省略</label>
+      <label class="check" id="collapseRow"><input type="checkbox" id="collapse"> 一致部分を省略</label>
       <div class="field">
         <label for="paperSel">印刷用紙</label>
         <select id="paperSel">
@@ -188,7 +189,7 @@ table#sidedoc{border-collapse:collapse; width:100%; table-layout:fixed; font-fam
     <div class="chip chg"><span class="n" id="sumChg">0</span><span class="l">変更箇所</span></div>
   </section>
 
-  <div class="dochost" id="docHost"><div class="empty">2つの .docx を読み込むと差分が表示されます。</div></div>
+  <div class="dochost" id="docHost"><div class="empty">.docx を読み込むと内容が表示されます。</div></div>
 
   <p class="footnote">
     すべての処理はブラウザ内で完結し、ファイルは外部送信されません。&nbsp;
@@ -244,6 +245,14 @@ return ctor.prototype=parent.prototype,child.prototype=new ctor,child.__super__=
   var state = { A: null, B: null, mode: "inline", collapse: true, paper: "a4p", result: null };
   var pending = null;
   var $ = function (id) { return document.getElementById(id); };
+  function effA() { return state.A || state.B; }
+  function effB() { return state.B || state.A; }
+  function isSingle() { return !!(state.A || state.B) && !(state.A && state.B); }
+  function updateModeUI() {
+    var single = isSingle();
+    $("modeField").classList.toggle("hidden", single);
+    $("collapseRow").classList.toggle("hidden", single);
+  }
 
   function saveSettings() {
     var s = { mode: state.mode, collapse: state.collapse, paper: state.paper };
@@ -292,8 +301,9 @@ return ctor.prototype=parent.prototype,child.prototype=new ctor,child.__super__=
   /* ---- 差分計算 ---- */
   function compute() {
     clearResult();
-    if (!state.A || !state.B) return;
-    var raw = JsDiff.diffLines(state.A.text || "", state.B.text || "");
+    updateModeUI();
+    if (!state.A && !state.B) return;
+    var raw = JsDiff.diffLines(effA().text || "", effB().text || "");
     var segs = [];
     for (var i = 0; i < raw.length; i++) {
       var p = raw[i];
@@ -309,7 +319,7 @@ return ctor.prototype=parent.prototype,child.prototype=new ctor,child.__super__=
       else if (s.type === "del") counts.removed += lineCount(s.a);
       else { counts.changed++; }
     });
-    state.result = { segs: segs, counts: counts };
+    state.result = { segs: segs, counts: counts, single: isSingle() };
     render();
   }
   function lineCount(s) { return s ? s.split("\n").filter(function (x) { return x !== ""; }).length : 0; }
@@ -319,26 +329,35 @@ return ctor.prototype=parent.prototype,child.prototype=new ctor,child.__super__=
   function render() {
     if (!state.result) return;
     var c = state.result.counts;
-    $("sumEqual").textContent = c.equal; $("sumAdd").textContent = c.added;
-    $("sumRem").textContent = c.removed; $("sumChg").textContent = c.changed;
-    $("summary").classList.remove("hidden");
+    var single = state.result.single;
+    if (single) {
+      $("summary").classList.add("hidden");
+    } else {
+      $("sumEqual").textContent = c.equal; $("sumAdd").textContent = c.added;
+      $("sumRem").textContent = c.removed; $("sumChg").textContent = c.changed;
+      $("summary").classList.remove("hidden");
+    }
 
     $("phA").textContent = state.A ? state.A.name : "";
     $("phB").textContent = state.B ? state.B.name : "";
-    $("phCounts").textContent = "一致 " + c.equal + "行 / 追加 " + c.added + "行 / 削除 " + c.removed + "行 / 変更 " + c.changed + "箇所";
+    $("phCounts").textContent = single ? "" : ("一致 " + c.equal + "行 / 追加 " + c.added + "行 / 削除 " + c.removed + "行 / 変更 " + c.changed + "箇所");
     $("phTime").textContent = new Date().toLocaleString("ja-JP");
 
-    var noDiff = c.added === 0 && c.removed === 0 && c.changed === 0;
     var host = $("docHost");
-    if (noDiff) { host.innerHTML = '<div class="empty">差分はありません。2つの文書は一致しています。</div>'; $("pdfBtn").disabled = true; return; }
-    host.innerHTML = state.mode === "side" ? renderSide() : renderInline();
+    if (single) {
+      if (!lines(effA().text || "").length) { host.innerHTML = '<div class="empty">本文が空です。</div>'; $("pdfBtn").disabled = true; return; }
+    } else {
+      var noDiff = c.added === 0 && c.removed === 0 && c.changed === 0;
+      if (noDiff) { host.innerHTML = '<div class="empty">差分はありません。2つの文書は一致しています。</div>'; $("pdfBtn").disabled = true; return; }
+    }
+    host.innerHTML = single ? renderInline(true) : (state.mode === "side" ? renderSide() : renderInline());
     $("pdfBtn").disabled = false;
   }
 
-  function renderInline() {
+  function renderInline(forceFull) {
     var out = ['<div class="docdiff">'];
     state.result.segs.forEach(function (s) {
-      if (s.type === "equal") { out.push(equalBlock(s.a)); }
+      if (s.type === "equal") { out.push(equalBlock(s.a, forceFull)); }
       else if (s.type === "ins") { lines(s.b).forEach(function (l) { out.push('<div class="ln ins-l"><ins>' + escapeHtml(l) + "</ins></div>"); }); }
       else if (s.type === "del") { lines(s.a).forEach(function (l) { out.push('<div class="ln del-l"><del>' + escapeHtml(l) + "</del></div>"); }); }
       else { out.push('<div class="ln rep-l">' + wordDiffHtml(s.a, s.b) + "</div>"); }
@@ -346,9 +365,9 @@ return ctor.prototype=parent.prototype,child.prototype=new ctor,child.__super__=
     out.push("</div>");
     return out.join("");
   }
-  function equalBlock(text) {
+  function equalBlock(text, forceFull) {
     var ls = lines(text);
-    if (state.collapse && ls.length > 6) {
+    if (!forceFull && state.collapse && ls.length > 6) {
       var head = ls.slice(0, 3), tail = ls.slice(-3), hidden = ls.length - 6;
       return head.map(eqLine).join("") + '<div class="collapsed">\u22ef ' + hidden + " 行一致 \u22ef</div>" + tail.map(eqLine).join("");
     }
@@ -397,7 +416,7 @@ return ctor.prototype=parent.prototype,child.prototype=new ctor,child.__super__=
   function clearResult() {
     state.result = null;
     $("summary").classList.add("hidden");
-    $("docHost").innerHTML = '<div class="empty">2つの .docx を読み込むと差分が表示されます。</div>';
+    $("docHost").innerHTML = '<div class="empty">.docx を読み込むと内容が表示されます。</div>';
     $("pdfBtn").disabled = true;
   }
   function applyPaper() { $("pageStyle").textContent = "@page{size:" + PAPER[state.paper] + ";margin:14mm}"; }
