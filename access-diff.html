@@ -369,7 +369,6 @@ td.c-uncmp{color:var(--muted)}
   function isSingle() { return !!(state.A || state.B) && !(state.A && state.B); }
   function updateModeUI() {
     var single = isSingle();
-    $("keyField").classList.toggle("hidden", single);
     $("diffOnlyRow").classList.toggle("hidden", single);
     $("tableSelLabel").textContent = single ? "テーブル" : "テーブル（同名）";
   }
