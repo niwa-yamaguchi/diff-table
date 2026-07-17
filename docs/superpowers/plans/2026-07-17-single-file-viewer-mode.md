@@ -1,6 +1,6 @@
 # 1ファイル登録時のビュワーモード対応 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: このプロジェクトのCLAUDE.md指示により、実装はサブエージェント "implementer-codex" に委譲し、実装完了後にサブエージェント "plan-reviewer-codex" にレビュー済みの本計画を渡して進めること。通常の superpowers:subagent-driven-development / superpowers:executing-plans は使わない。Steps はチェックボックス（`- [ ]`）で進捗管理する。
+> **For agentic workers:** REQUIRED SUB-SKILL: ユーザーのグローバル設定（`~/.claude/CLAUDE.md`）の指示により、実装はサブエージェント "implementer-codex" に委譲し、実装完了後にメインセッションが結果を確認すること。通常の superpowers:subagent-driven-development / superpowers:executing-plans は使わない。Steps はチェックボックス（`- [ ]`）で進捗管理する。各Taskの「ブラウザで手動確認する」Stepは、実行環境にブラウザ操作の手段がない場合はメインセッションに差し戻し、人間のレビュアーに確認を依頼すること。
 
 **Goal:** `excel-diff.html` / `access-diff.html` / `word-diff.html` の3ツールで、ファイルAまたはBのどちらか一方だけが登録された状態でも、そのファイルの中身をそのまま閲覧できる「ビュワーモード」として機能するようにする。2ファイル目を追加すれば既存の差分比較モードに自動的に切り替わる。
 
@@ -22,9 +22,14 @@
 ## Task 1: excel-diff.html — 1ファイル登録時のビュワー対応
 
 **Files:**
-- Modify: `excel-diff.html`（HTML: 167行目付近, 179行目付近／CSS: 47行目付近／JS: 335-613行目のアプリロジック）
+
+- Modify: `excel-diff.html`
+  - HTML: 145行目（サブタイトル）, 167行目（modebar）, 171行目（tabsプレースホルダ）, 179行目（diffOnly行）, 210行目（初期プレースホルダ）
+  - CSS: 47行目付近（`.hidden` ルール追加）
+  - JS: 343行目付近（ヘルパー追加）, 396-411行目（`refreshAll`）, 412-428行目（`buildTabs`）, 444-448行目（`currentPair`）, 466-505行目（`compute`）, 507-529行目（`render`前半）, 570-575行目付近（`clearResult`）
 
 **Interfaces:**
+
 - Produces: `effA()`, `effB()`, `isSingle()`, `updateModeUI()` — Task 2, 3では使わないが、同名パターンをAccess/Wordでも独自に実装する（ファイルが分かれているため共有はしない）。
 
 - [ ] **Step 1: HTMLに比較専用UI要素のID付与とプレースホルダ文言修正**
@@ -150,7 +155,7 @@
     }
     var single = isSingle();
     $("manualPair").disabled = single;
-    if (single) state.manual = false;
+    if (single) { state.manual = false; $("manualPair").checked = false; }
     var common = intersect(effA().sheets, effB().sheets);
     state.sheetA = fillSelect($("sheetASel"), effA().sheets, firstIn([pending && pending.sheetA, state.sheetA, common[0], effA().sheets[0]], effA().sheets));
     state.sheetB = fillSelect($("sheetBSel"), effB().sheets, firstIn([pending && pending.sheetB, state.sheetB, common[0], effB().sheets[0]], effB().sheets));
@@ -183,7 +188,28 @@
     var inA = mapOf(effA().sheets), inB = mapOf(effB().sheets);
 ```
 
-（以降の `buildTabs` 内のロジックは変更しない）
+（`buildTabs` 内、タブ生成ループ自体のロジックは変更しない。ただし末尾の「同名シートがありません」の分岐は次のStepで変更する）
+
+- [ ] **Step 5b: buildTabs() の0件メッセージを single 対応にする**
+
+`excel-diff.html:426-427` を次のように変更する:
+
+変更前:
+```javascript
+    if (common.length === 0) { host.innerHTML += '<span class="tabhint">同名シートがありません。右上「比較するシートを選ぶ」で手動指定できます。</span>'; state.sheet = null; return; }
+    state.sheet = want || null;
+```
+
+変更後:
+```javascript
+    if (common.length === 0) {
+      host.innerHTML += isSingle()
+        ? '<span class="tabhint">このファイルにはシートがありません。</span>'
+        : '<span class="tabhint">同名シートがありません。右上「比較するシートを選ぶ」で手動指定できます。</span>';
+      state.sheet = null; return;
+    }
+    state.sheet = want || null;
+```
 
 - [ ] **Step 6: currentPair() を単一ファイル対応にする**
 
@@ -294,12 +320,14 @@
     }
     if (msgs.length) { warn.innerHTML = msgs.map(escapeHtml).join("<br>"); warn.classList.remove("hidden"); } else warn.classList.add("hidden");
 
-    var mergeView = R.hasMerge && !state.diffOnly;
+    var mergeView = R.hasMerge && (R.single || !state.diffOnly);
     var rowsToShow = [];
     for (var r = 0; r < R.rows; r++) { if (R.single || !state.diffOnly || R.rowHasDiff[r]) rowsToShow.push(r); }
 ```
 
 （以降の行番号は変わるが、`render()` の残りのロジック — CAP処理・thead/tbody生成 — は変更しない）
+
+> **注記（Critical修正）:** `state.diffOnly` はCookie/localStorageから復元される値であり、単一ファイル表示時に前回セッションの値が `true` のまま残っている場合がある。`mergeView` の判定に `R.single` を含めないと、結合セルを含むシートを単一ファイル表示した際に「差分のある行のみ」相当の展開表示（結合解除）になってしまい、設計書の「結合セルはそのまま結合表示を再現」という要件に反する。単一ファイル時は常に結合表示を優先する。
 
 - [ ] **Step 9: clearResult() のプレースホルダ文言を修正**
 
@@ -337,13 +365,17 @@
    - タブにそのファイルの全シート名が表示され、クリックで切り替えられる。
    - 選択中シートの内容が通常の見た目（差分色なし）でグリッド表示される。
    - サマリー行（一致/追加/削除/変更）が非表示。
-   - 「比較するシートを選ぶ」チェックボックス行が非表示。
+   - 「比較するシートを選ぶ」チェックボックス行が非表示、チェック自体も外れている。
    - 「差分のある行のみ表示」チェックボックス行が非表示。
-   - PDF出力ボタンが有効で、クリックして印刷プレビューが出る。
+   - PDF出力ボタンが有効で、クリックして印刷プレビューが出る。印刷ヘッダのB欄が空欄のまま崩れずに表示される。
    - 結合セルを含むシートで、結合がそのまま表示される。
-4. ファイルBに2つ目の `.xlsx` を読み込み、既存通りの同名シート差分比較（サマリー・警告・チェックボックス行が再表示）に切り替わることを確認する。
-5. ファイルAを外し、ファイルBのみの状態でも同様に単体ビュワー表示になることを確認する。
-6. コンソールにJavaScriptエラーが出ていないことを確認する。
+   - シートが0件のブック（あれば）で「このファイルにはシートがありません。」と表示される。
+4. 事前に「差分のある行のみ表示」にチェックを入れた状態（Cookie/localStorageに `diffOnly=true` を保存させた状態）でページを再読み込みし、ファイルAのみを読み込む。結合セルを含むシートで結合表示が解除されず、そのまま結合表示されることを確認する（`mergeView` の `R.single` 考慮の検証）。
+5. 4001行を超える大きいシートを持つファイルで、「先頭 4000 行のみ表示。」の注記が単一ファイル表示でも出ることを確認する。
+6. ファイルBに2つ目の `.xlsx` を読み込み、既存通りの同名シート差分比較（サマリー・警告・チェックボックス行が再表示、チェック状態も正しく反映）に切り替わることを確認する。
+7. ページを再読み込みし、今度はファイルBのみを読み込んで、同様に単体ビュワー表示になることを確認する。
+8. 「比較するシートを選ぶ」を手動でオンにした状態（2ファイル時）でシートA/Bを選び、その状態を保ったままページを再読み込みし、2ファイルを再度読み込んで手動ペア設定が復元されることを確認する（既存動作の回帰確認）。
+9. コンソールにJavaScriptエラーが出ていないことを確認する。
 
 - [ ] **Step 12: コミット**
 
@@ -364,14 +396,19 @@ EOF
 ## Task 2: access-diff.html — 1ファイル登録時のビュワー対応
 
 **Files:**
-- Modify: `access-diff.html`（HTML: 267-276行目付近, 291行目付近／CSS: 93行目付近／JS: 343-800行目のアプリロジック）
+
+- Modify: `access-diff.html`
+  - HTML: 241行目（サブタイトル）, 267行目（テーブル選択ラベル）, 270-276行目（キー列フィールド）, 291行目（diffOnly行）, 318行目（初期プレースホルダ）
+  - CSS: 93行目付近（`.hidden` ルール追加）
+  - JS: 365行目付近（ヘルパー追加）, 451-473行目（`refreshTableChoices`）, 475-486行目（`commonColumns`）, 572-606行目（`compute`）, 641-665行目（`render`前半）, 727-733行目（`clearResult`）
 
 **Interfaces:**
+
 - Produces: `effA()`, `effB()`, `isSingle()`, `updateModeUI()`（Task 1と同じ役割だが、このファイル内で独立して定義する）。
 
 - [ ] **Step 1: HTMLに比較専用UI要素のID付与とプレースホルダ文言修正**
 
-`access-diff.html:266-269` を次のように変更する:
+`access-diff.html:266-269` を次のように変更する（ラベルに `id="tableSelLabel"` を追加し、単一ファイル時に「テーブル（同名）」→「テーブル」に文言を切り替えられるようにする）:
 
 変更前:
 ```html
@@ -384,7 +421,7 @@ EOF
 変更後:
 ```html
       <div class="field">
-        <label for="tableSel">テーブル（同名）</label>
+        <label for="tableSel" id="tableSelLabel">テーブル（同名）</label>
         <select id="tableSel" disabled><option>— ファイルを読み込んでください —</option></select>
       </div>
 ```
@@ -473,6 +510,7 @@ EOF
     var single = isSingle();
     $("keyField").classList.toggle("hidden", single);
     $("diffOnlyRow").classList.toggle("hidden", single);
+    $("tableSelLabel").textContent = single ? "テーブル" : "テーブル（同名）";
   }
 
   /* ---------- 設定の保存 / 復元（Cookie + localStorage 保険） ---------- */
@@ -523,7 +561,7 @@ EOF
     var common = intersect(effA().tables, effB().tables);
     if (common.length === 0) {
       sel.disabled = true;
-      addOpt(sel, "", "— 同名テーブルがありません —");
+      addOpt(sel, "", isSingle() ? "— テーブルがありません —" : "— 同名テーブルがありません —");
       state.table = null; resetColControls(); clearResult(); return;
     }
     sel.disabled = false;
@@ -536,6 +574,8 @@ EOF
     else { state.table = null; }
   }
 ```
+
+> **注記:** `common` は単一ファイル時 `effA() === effB()` により当該ファイルの全テーブル名になるため、`common.length === 0` は「読み込んだDBにテーブルが1つもない」という異常系のみを指す。この場合のメッセージも比較前提の文言にならないよう `isSingle()` で出し分ける。
 
 - [ ] **Step 5: commonColumns() を effA/effB ベースにする**
 
@@ -689,14 +729,17 @@ EOF
 1. `access-diff.html` をブラウザで直接開く。
 2. 複数テーブルを持つ `.mdb` または `.accdb` ファイルをファイルAのドロップ枠にのみ読み込む。
 3. 確認項目:
+   - テーブル選択の見出しが「テーブル（同名）」ではなく「テーブル」になっている。
    - テーブル選択プルダウンにそのファイルの全テーブル名が表示される。
    - テーブルを選ぶと全レコードが通常の見た目（差分色なし）でグリッド表示される。
    - サマリー行・「キー列（複合可）」フィールド・「差分のみ表示」チェックボックス行が非表示。
    - 列ヘッダクリックによるソート（昇順/降順ボタン含む）が機能する。
    - PDF出力ボタンが有効で機能する。
-4. ファイルBに2つ目のDBファイルを読み込み、既存通りの複合キー差分比較（サマリー・キー選択・警告・チェックボックス行が再表示）に切り替わることを確認する。
-5. ファイルAを外し、ファイルBのみの状態でも同様に単体ビュワー表示になることを確認する。
-6. コンソールにJavaScriptエラーが出ていないことを確認する。
+   - 6001件を超える大きいテーブルで「先頭 6000 行のみ表示」の注記が単一ファイル表示でも出ることを確認する。
+4. ファイルBに2つ目のDBファイルを読み込み、既存通りの複合キー差分比較（サマリー・キー選択・警告・チェックボックス行が再表示、テーブル選択見出しが「テーブル（同名）」に戻る）に切り替わることを確認する。
+5. ページを再読み込みし、今度はファイルBのみを読み込んで、同様に単体ビュワー表示になることを確認する。
+6. 2ファイル時に列ヘッダクリックで並べ替え・「差分のみ表示」・キー列を変更した状態でページを再読み込みし、2ファイルを再度読み込んで、既存通りにこれらの設定が復元されることを確認する（既存動作の回帰確認）。
+7. コンソールにJavaScriptエラーが出ていないことを確認する。
 
 - [ ] **Step 11: コミット**
 
@@ -717,9 +760,14 @@ EOF
 ## Task 3: word-diff.html — 1ファイル登録時のビュワー対応
 
 **Files:**
-- Modify: `word-diff.html`（HTML: 157-161行目付近／CSS: 60行目付近／JS: 238-433行目のアプリロジック）
+
+- Modify: `word-diff.html`
+  - HTML: 134行目（サブタイトル）, 157-161行目（モード切替・省略チェックボックス）, 191行目（初期プレースホルダ）
+  - CSS: 60行目付近（`.hidden` ルール追加）
+  - JS: 246行目付近（ヘルパー追加）, 293-314行目（`compute`）, 319-336行目（`render`）, 338-357行目（`renderInline`/`equalBlock`）, 397-402行目付近（`clearResult`）
 
 **Interfaces:**
+
 - Produces: `effA()`, `effB()`, `isSingle()`, `updateModeUI()`（Task 1/2と同じ役割だが、このファイル内で独立して定義する）。
 
 - [ ] **Step 1: HTMLに比較専用UI要素のID付与とプレースホルダ文言修正**
@@ -990,14 +1038,16 @@ EOF
 - [ ] **Step 9: ブラウザで手動確認する**
 
 1. `word-diff.html` をブラウザで直接開く。
-2. 複数段落を含む `.docx` ファイルをファイルAのドロップ枠にのみ読み込む。
-3. 確認項目:
-   - 本文全体が省略なく（折りたたみなしで）プレーン表示される。差分ハイライト（挿入・削除・変更の色）が付かない。
+2. 事前に「一致部分を省略」にチェックを入れて7段落以上ある文書で省略表示を確認した後（Cookie/localStorageに `collapse=true` を保存させる）、ページを再読み込みする。
+3. 7段落以上ある `.docx` ファイルをファイルAのドロップ枠にのみ読み込む。
+4. 確認項目:
+   - `collapse=true` が保存されていても、本文全体が省略なく（折りたたみなしで）プレーン表示される。差分ハイライト（挿入・削除・変更の色）が付かない。
    - サマリー行・「表示」モード切替フィールド・「一致部分を省略」チェックボックス行が非表示。
    - PDF出力ボタンが有効で機能する。
-4. ファイルBに2つ目の `.docx` を読み込み、既存通りの段落・語単位の差分比較（サマリー・モード切替・省略チェックボックスが再表示）に切り替わることを確認する。
-5. ファイルAを外し、ファイルBのみの状態でも同様に単体ビュワー表示になることを確認する。
-6. コンソールにJavaScriptエラーが出ていないことを確認する。
+5. 本文が空（0段落）の `.docx` を読み込んだ場合に、コンソールエラーなく空の表示領域になることを確認する（既存に「空です」等の専用メッセージはないため、真っ白な表示で問題ない）。
+6. ファイルBに2つ目の `.docx` を読み込み、既存通りの段落・語単位の差分比較（サマリー・モード切替・省略チェックボックスが再表示、`collapse` 設定も反映）に切り替わることを確認する。
+7. ページを再読み込みし、今度はファイルBのみを読み込んで、同様に単体ビュワー表示になることを確認する。
+8. コンソールにJavaScriptエラーが出ていないことを確認する。
 
 - [ ] **Step 10: コミット**
 
@@ -1096,8 +1146,50 @@ EOF
 
 ---
 
+## Task 5: 統合スモークテスト（3ツール横断・回帰確認）
+
+**Files:**
+
+- なし（コード変更なし。Task 1-4完了後の最終確認のみ）
+
+**Interfaces:**
+
+- Consumes: Task 1-4で変更した4ファイルすべて。
+
+- [ ] **Step 1: 3ツールを一通り単体ビュワーとして確認する**
+
+1. `index.html` から各ツールに遷移し、更新後の説明文からリンクで正しく各ツールに移動できることを確認する。
+2. Excel・Access・Wordそれぞれで、ファイルA単体・ファイルB単体の両方のパターンで単体ビュワー表示になることを一通り再確認する（Task 1/2/3の手動確認Stepで個別に確認済みだが、同一ブラウザセッション内で3ツールを連続して開いた場合に設定（Cookie/localStorage）が混線しないことを確認する目的）。
+
+- [ ] **Step 2: 2ファイル揃った状態での既存動作に回帰がないことを確認する**
+
+1. Excel: 同名シートがある2ファイル、同名シートが無い2ファイル（手動ペア選択が必要になるケース）、結合セルを含む2ファイルで、既存の差分比較結果が変更前と同じ見た目になることを確認する。
+2. Access: 同名テーブルがある2ファイル、キー重複があるテーブルを含む2ファイルで、既存の差分比較結果（重複警告・A/Bのみ列バッジ含む）が変更前と同じ見た目になることを確認する。
+3. Word: 内容が完全に一致する2ファイル（「差分はありません。2つの文書は一致しています。」の表示が引き続き出ること）、差分がある2ファイルで、既存の差分比較結果が変更前と同じ見た目になることを確認する。
+4. 3ツールとも、片方のファイルの読み込みに失敗した場合（対応形式外のファイルを読ませる等）に、既存通りのエラーメッセージが `#err` に表示されることを確認する。
+
+- [ ] **Step 3: コンソールエラーの最終確認**
+
+1. 上記すべての操作を通して、ブラウザの開発者コンソールにJavaScriptエラーや警告が出ていないことを確認する。
+2. 問題が見つかった場合は該当Taskに戻って修正し、該当ファイルのみ再コミットする。
+
 ## Plan Self-Review Notes
 
-- **Spec coverage:** Excel/Access/Word 各ツールの仕様（全シート/全テーブル表示、差分色なし表示、比較専用UI非表示、2ファイル目追加時の自動切り替え、ソート機能の維持）をTask 1-3で実装。index.html・各ツールサブタイトルの文言更新をTask 1(Step10)/2(Step9)/3(Step8)/4で実装。テスト方針（手動確認）は各Taskの最終Stepに反映。
+- **Spec coverage:** Excel/Access/Word 各ツールの仕様（全シート/全テーブル表示、差分色なし表示、比較専用UI非表示、2ファイル目追加時の自動切り替え、ソート機能の維持）をTask 1-3で実装。index.html・各ツールサブタイトルの文言更新をTask 1(Step10)/2(Step9)/3(Step8)/4で実装。テスト方針（手動確認）は各Taskの最終Stepおよび設計書の「実装上の既知の制約」節に反映。
 - **既存動作への影響:** `effA()`/`effB()` は2ファイル揃った状態では常に `state.A`/`state.B` をそのまま返すため、2ファイル時の既存ロジック・見た目は変更されない。
 - **Wordの折りたたみ:** single時は `forceFull=true` により常に全文表示にする（`state.collapse` の値に関わらず省略しない）。これは「ビュワーとして中身を確認できる」という目的に沿うための実装判断。
+
+### plan-reviewer-codex によるレビュー反映（2026-07-17）
+
+1回目のレビューで指摘されたCritical 2件・主要Warningを本計画に反映済み:
+
+- **[Critical→対応済み] Excel: `diffOnly` 残留による結合セル表示破綻** — Task 1 Step 8で `mergeView` の判定に `R.single` を追加し、単一ファイル時は `state.diffOnly` の値に関わらず結合表示を維持するよう修正。
+- **[Critical→対応済み] Excel: `manual` 復元状態とチェックボックスUIの不整合** — Task 1 Step 4で、単一ファイル時に `state.manual = false` とあわせて `$("manualPair").checked = false` も設定し、内部状態とDOMを同期させるよう修正。
+- **[Warning→対応済み] 0シート/0テーブルの空データケースの文言** — Excel `buildTabs()`（Task 1 Step 5b 新設）、Access `refreshTableChoices()`（Task 2 Step 4）で、単一ファイル時は比較を前提にした文言を出さないよう `isSingle()` で出し分け。
+- **[Warning→対応済み] Accessの「テーブル（同名）」ラベルの残留** — `id="tableSelLabel"` を追加し、`updateModeUI()` で単一ファイル時は「テーブル」に切り替えるよう対応（Task 2 Step 1, Step 3）。
+- **[Warning→対応済み] 設定復元・表示上限・PDF出力の手動確認漏れ** — 各Taskの手動確認Stepに、Cookie/localStorage復元確認（`diffOnly`/`manual`/`collapse`等の残留値が単一ファイル表示を壊さないこと）、表示上限（Excel 4000行/Access 6000行）、PDF出力の見た目確認、「ファイルを外す」の代替手段（ページ再読み込み＋別スロットのみ読み込み）を追加。
+- **[Warning→対応済み] Files欄の変更箇所一覧が不完全** — 各Taskの「Files」を実際に変更する行番号の完全なリストに更新。
+- **[Warning→対応済み] 統合スモークテストの欠如** — Task 5として新設し、3ツール横断の確認と2ファイル時の既存動作の回帰確認をまとめた。
+- **[Warning→設計書に反映] Wordの「diff処理なし」という表現、Wordの空段落消失、Accessのキーバッジ残留** — 実装を変更する代わりに、設計書に「実装上の既知の制約」節を新設し、既存ロジック流用に伴う許容事項として明記した。
+- **[Question→回答] 「ファイルを外す」操作** — 現行UIに解除ボタンは無いため、手動確認手順は「ページを再読み込みして別スロットのみ読み込む」という操作に置き換えた。
+- **[Question→対応不要と判断] CLAUDE.md参照・bash heredocの前提** — 計画冒頭の記述をユーザーのグローバル設定である旨に明確化。bash heredocはこの環境のBashツール（Git Bash）で問題なく動作するため対応不要と判断。
