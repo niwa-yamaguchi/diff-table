@@ -45,6 +45,7 @@ body{background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:
 
 .tabs{display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; align-items:center; min-height:34px}
 .tabs.hidden,.pairsel.hidden{display:none}
+.hidden{display:none}
 .modebar{display:flex; align-items:center; gap:12px; margin-top:14px}
 .modehint{font-size:11px; color:var(--muted)}
 .pairsel{display:flex; align-items:flex-end; gap:12px; margin-top:14px; flex-wrap:wrap}
@@ -142,7 +143,7 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
 <div class="wrap">
   <header class="masthead">
     <h1>Excel 差分ビューア<span class="dot">.</span></h1>
-    <span class="sub">2つの .xlsx をシートごとにセル比較</span>
+    <span class="sub">1つならビュワー、2つなら .xlsx をシートごとにセル比較</span>
     <nav class="nav">
       <a href="access-diff.html">Access</a>
       <a href="excel-diff.html" class="here">Excel</a>
@@ -164,11 +165,11 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
       </div>
     </div>
 
-    <div class="modebar">
+    <div class="modebar" id="modebar">
       <label class="check"><input type="checkbox" id="manualPair" disabled> 比較するシートを選ぶ</label>
       <span class="modehint">オフ＝同名シートを比較</span>
     </div>
-    <div class="tabs" id="tabs"><span class="tabhint">2ファイルを読み込むとシートが表示されます</span></div>
+    <div class="tabs" id="tabs"><span class="tabhint">ファイルを読み込むとシートが表示されます</span></div>
     <div class="pairsel hidden" id="pairSel">
       <div class="field"><label for="sheetASel">シート A</label><select id="sheetASel"></select></div>
       <span class="pairarrow">&#8596;</span>
@@ -176,7 +177,7 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
     </div>
 
     <div class="row2">
-      <label class="check"><input type="checkbox" id="diffOnly"> 差分のある行のみ表示</label>
+      <label class="check" id="diffOnlyRow"><input type="checkbox" id="diffOnly"> 差分のある行のみ表示</label>
       <div class="field">
         <label for="paperSel">印刷用紙</label>
         <select id="paperSel">
@@ -207,7 +208,7 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
   </section>
   <div class="warn hidden" id="warn"></div>
 
-  <div class="tablehost" id="tableHost"><div class="empty">2つのファイルを読み込み、シートを選ぶと差分が表示されます。</div></div>
+  <div class="tablehost" id="tableHost"><div class="empty">ファイルを読み込み、シートを選ぶと内容が表示されます。</div></div>
 
   <p class="footnote">
     すべての処理はブラウザ内で完結し、ファイルは外部送信されません。&nbsp;
@@ -341,6 +342,14 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
   var state = { A: null, B: null, sheet: null, manual: false, sheetA: null, sheetB: null, diffOnly: false, paper: "a3l", result: null };
   var pending = null;
   var $ = function (id) { return document.getElementById(id); };
+  function effA() { return state.A || state.B; }
+  function effB() { return state.B || state.A; }
+  function isSingle() { return !!(state.A || state.B) && !(state.A && state.B); }
+  function updateModeUI() {
+    var single = isSingle();
+    $("modebar").classList.toggle("hidden", single);
+    $("diffOnlyRow").classList.toggle("hidden", single);
+  }
 
   function saveSettings() {
     var s = { sheet: state.sheet, manual: state.manual, sheetA: state.sheetA, sheetB: state.sheetB, diffOnly: state.diffOnly, paper: state.paper };
@@ -394,16 +403,27 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
 
   /* ---- シート選択UI（同名タブ + 手動ペア） ---- */
   function refreshAll() {
+    updateModeUI();
     var tabsHost = $("tabs");
-    if (!state.A || !state.B) {
-      tabsHost.innerHTML = '<span class="tabhint">2ファイルを読み込むとシートが表示されます</span>';
+    if (!state.A && !state.B) {
+      tabsHost.innerHTML = '<span class="tabhint">ファイルを読み込むとシートが表示されます</span>';
       $("pairSel").classList.add("hidden"); $("manualPair").disabled = true;
       state.sheet = null; clearResult(); return;
     }
-    $("manualPair").disabled = false;
-    var common = intersect(state.A.sheets, state.B.sheets);
-    state.sheetA = fillSelect($("sheetASel"), state.A.sheets, firstIn([pending && pending.sheetA, state.sheetA, common[0], state.A.sheets[0]], state.A.sheets));
-    state.sheetB = fillSelect($("sheetBSel"), state.B.sheets, firstIn([pending && pending.sheetB, state.sheetB, common[0], state.B.sheets[0]], state.B.sheets));
+    var single = isSingle();
+    $("manualPair").disabled = single;
+    if (single) {
+      if (state.pendingManual === undefined) state.pendingManual = state.manual;
+      state.manual = false;
+      $("manualPair").checked = false;
+    } else if (state.pendingManual !== undefined) {
+      state.manual = state.pendingManual;
+      $("manualPair").checked = state.manual;
+      state.pendingManual = undefined;
+    }
+    var common = intersect(effA().sheets, effB().sheets);
+    state.sheetA = fillSelect($("sheetASel"), effA().sheets, firstIn([pending && pending.sheetA, state.sheetA, common[0], effA().sheets[0]], effA().sheets));
+    state.sheetB = fillSelect($("sheetBSel"), effB().sheets, firstIn([pending && pending.sheetB, state.sheetB, common[0], effB().sheets[0]], effB().sheets));
     buildTabs(common, firstIn([pending && pending.sheet, state.sheet, common[0]], common));
     pending = null;
     toggleMode();
@@ -412,8 +432,8 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
   function buildTabs(common, want) {
     var host = $("tabs"); host.innerHTML = "";
     var union = [], seen = {};
-    state.A.sheets.concat(state.B.sheets).forEach(function (n) { if (!seen[n]) { seen[n] = 1; union.push(n); } });
-    var inA = mapOf(state.A.sheets), inB = mapOf(state.B.sheets);
+    effA().sheets.concat(effB().sheets).forEach(function (n) { if (!seen[n]) { seen[n] = 1; union.push(n); } });
+    var inA = mapOf(effA().sheets), inB = mapOf(effB().sheets);
     union.forEach(function (n) {
       var only = inA[n] && inB[n] ? null : (inA[n] ? "A" : "B");
       var tab = document.createElement("button"); tab.type = "button";
@@ -423,7 +443,12 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
       else tab.addEventListener("click", function () { selectCommon(n); });
       host.appendChild(tab);
     });
-    if (common.length === 0) { host.innerHTML += '<span class="tabhint">同名シートがありません。右上「比較するシートを選ぶ」で手動指定できます。</span>'; state.sheet = null; return; }
+    if (common.length === 0) {
+      host.innerHTML += isSingle()
+        ? '<span class="tabhint">このファイルにはシートがありません。</span>'
+        : '<span class="tabhint">同名シートがありません。右上「比較するシートを選ぶ」で手動指定できます。</span>';
+      state.sheet = null; return;
+    }
     state.sheet = want || null;
   }
   function selectCommon(name) {
@@ -442,7 +467,8 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
   }
 
   function currentPair() {
-    if (!state.A || !state.B) return null;
+    if (!state.A && !state.B) return null;
+    if (isSingle()) { if (!state.sheet) return null; return { a: state.sheet, b: state.sheet, manual: false }; }
     if (state.manual) { if (!state.sheetA || !state.sheetB) return null; return { a: state.sheetA, b: state.sheetB, manual: true }; }
     if (!state.sheet) return null; return { a: state.sheet, b: state.sheet, manual: false };
   }
@@ -466,7 +492,7 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
   function compute() {
     clearResult();
     var p = currentPair(); if (!p) return;
-    var A = sheetModel(state.A.wb, p.a), B = sheetModel(state.B.wb, p.b);
+    var A = sheetModel(effA().wb, p.a), B = sheetModel(effB().wb, p.b);
     var rows = Math.max(A.rows, B.rows), cols = Math.max(A.cols, B.cols);
 
     var agreed = {}, coveredAgreed = {};
@@ -500,32 +526,39 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
       cells.push(line); rowHasDiff.push(diff);
     }
     state.result = { rows: rows, cols: cols, cells: cells, rowHasDiff: rowHasDiff, counts: counts, mismatch: mismatch, pair: p,
-      hasMerge: A.mergeCount > 0 || B.mergeCount > 0, mergeA: A.mergeCount, mergeB: B.mergeCount, dimA: { r: A.rows, c: A.cols }, dimB: { r: B.rows, c: B.cols } };
+      hasMerge: A.mergeCount > 0 || B.mergeCount > 0, mergeA: A.mergeCount, mergeB: B.mergeCount, dimA: { r: A.rows, c: A.cols }, dimB: { r: B.rows, c: B.cols },
+      single: isSingle() };
     render();
   }
 
   function render() {
     if (!state.result) return;
     var R = state.result, c = R.counts;
-    $("sumSame").textContent = c.same; $("sumAdd").textContent = c.added; $("sumRem").textContent = c.removed; $("sumChg").textContent = c.changed;
-    $("summary").classList.remove("hidden");
+    if (R.single) {
+      $("summary").classList.add("hidden");
+    } else {
+      $("sumSame").textContent = c.same; $("sumAdd").textContent = c.added; $("sumRem").textContent = c.removed; $("sumChg").textContent = c.changed;
+      $("summary").classList.remove("hidden");
+    }
 
     $("phA").textContent = state.A ? state.A.name : "";
     $("phB").textContent = state.B ? state.B.name : "";
     $("phSheet").textContent = R.pair.manual ? (R.pair.a + " \u2194 " + R.pair.b) : R.pair.a;
-    $("phCounts").textContent = "一致 " + c.same + " / 追加 " + c.added + " / 削除 " + c.removed + " / 変更 " + c.changed;
+    $("phCounts").textContent = R.single ? "" : ("一致 " + c.same + " / 追加 " + c.added + " / 削除 " + c.removed + " / 変更 " + c.changed);
     $("phTime").textContent = new Date().toLocaleString("ja-JP");
 
     var warn = $("warn"), msgs = [];
-    if (R.pair.manual && R.pair.a !== R.pair.b) msgs.push("異なる名前のシートを比較中: A「" + R.pair.a + "」 \u2194 B「" + R.pair.b + "」");
-    if (R.dimA.r !== R.dimB.r || R.dimA.c !== R.dimB.c) msgs.push("範囲が異なります（A: " + R.dimA.r + "行\u00d7" + R.dimA.c + "列 / B: " + R.dimB.r + "行\u00d7" + R.dimB.c + "列）。位置基準で比較しています。");
-    if (R.hasMerge) msgs.push("結合セルを検出（A: " + R.mergeA + " / B: " + R.mergeB + "）。結合範囲は値を展開して比較しています。");
-    if (R.mismatch > 0) msgs.push("\u26a0 結合構造がA/Bで異なる箇所が " + R.mismatch + " セルあります（該当セルは印付きでセル単位表示）。");
+    if (!R.single) {
+      if (R.pair.manual && R.pair.a !== R.pair.b) msgs.push("異なる名前のシートを比較中: A「" + R.pair.a + "」 \u2194 B「" + R.pair.b + "」");
+      if (R.dimA.r !== R.dimB.r || R.dimA.c !== R.dimB.c) msgs.push("範囲が異なります（A: " + R.dimA.r + "行\u00d7" + R.dimA.c + "列 / B: " + R.dimB.r + "行\u00d7" + R.dimB.c + "列）。位置基準で比較しています。");
+      if (R.hasMerge) msgs.push("結合セルを検出（A: " + R.mergeA + " / B: " + R.mergeB + "）。結合範囲は値を展開して比較しています。");
+      if (R.mismatch > 0) msgs.push("\u26a0 結合構造がA/Bで異なる箇所が " + R.mismatch + " セルあります（該当セルは印付きでセル単位表示）。");
+    }
     if (msgs.length) { warn.innerHTML = msgs.map(escapeHtml).join("<br>"); warn.classList.remove("hidden"); } else warn.classList.add("hidden");
 
-    var mergeView = R.hasMerge && !state.diffOnly;
+    var mergeView = R.hasMerge && (R.single || !state.diffOnly);
     var rowsToShow = [];
-    for (var r = 0; r < R.rows; r++) { if (!state.diffOnly || R.rowHasDiff[r]) rowsToShow.push(r); }
+    for (var r = 0; r < R.rows; r++) { if (R.single || !state.diffOnly || R.rowHasDiff[r]) rowsToShow.push(r); }
     var CAP = 4000, capped = rowsToShow.length > CAP; if (capped) rowsToShow = rowsToShow.slice(0, CAP);
 
     var thead = '<tr><th class="corner"></th>';
@@ -570,7 +603,7 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
   function clearResult() {
     state.result = null;
     $("summary").classList.add("hidden"); $("warn").classList.add("hidden");
-    $("tableHost").innerHTML = '<div class="empty">シートを選ぶと差分が表示されます。</div>';
+    $("tableHost").innerHTML = '<div class="empty">シートを選ぶと内容が表示されます。</div>';
     $("pdfBtn").disabled = true;
   }
   function applyPaper() { $("pageStyle").textContent = "@page{size:" + PAPER[state.paper] + ";margin:10mm}"; }
