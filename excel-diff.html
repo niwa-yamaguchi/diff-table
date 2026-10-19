@@ -108,8 +108,8 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
 .licenses{margin-top:12px; font-size:11px; color:var(--muted)}
 .licenses summary{cursor:pointer; color:var(--accent-ink); font-weight:600; list-style:none; display:inline-block}
 .licenses summary::-webkit-details-marker{display:none}
-.licenses summary::before{content:"\\25b8  "}
-.licenses[open] summary::before{content:"\\25be  "}
+.licenses summary::before{content:"\25b8  "}
+.licenses[open] summary::before{content:"\25be  "}
 .licenses ul{margin:8px 0 4px; padding-left:16px; line-height:1.75}
 .licenses li{margin:1px 0}
 .licenses .lic{color:var(--ink); font-weight:600}
@@ -373,9 +373,17 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
     return "S:" + String(v);
   }
   function isEmpty(v) { return v === null || v === undefined || v === ""; }
+  // SheetJS はローカル時刻で Date を作るため、UTC の toISOString ではなくローカルで整形する
+  function fmtLocalDate(v) {
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    v = new Date(Math.round(v.getTime() / 1000) * 1000); // シリアル値の浮動小数誤差（12:29:59.999 等）を秒に丸める
+    var d = v.getFullYear() + "-" + p(v.getMonth() + 1) + "-" + p(v.getDate());
+    var t = p(v.getHours()) + ":" + p(v.getMinutes()) + ":" + p(v.getSeconds());
+    return t === "00:00:00" ? d : d + " " + t;
+  }
   function displayValue(v) {
     if (isEmpty(v)) return { text: "", cls: "" };
-    if (v instanceof Date) { var iso = v.toISOString(); var hasTime = iso.slice(11, 19) !== "00:00:00"; return { text: hasTime ? iso.slice(0, 19).replace("T", " ") : iso.slice(0, 10), cls: "v-date" }; }
+    if (v instanceof Date) { return { text: fmtLocalDate(v), cls: "v-date" }; }
     if (typeof v === "boolean") return { text: v ? "TRUE" : "FALSE", cls: "v-bool" };
     if (typeof v === "number") return { text: String(v), cls: "v-num" };
     return { text: String(v), cls: "" };
