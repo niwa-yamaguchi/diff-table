@@ -178,6 +178,10 @@ td.c-chg .new{color:var(--add-ink); font-weight:600}
 td.c-rem span{color:var(--rem-ink)}
 td.c-absent{color:#C2C9D0}
 td.c-uncmp{color:var(--muted)}
+#difftable thead th[data-col]{cursor:pointer; user-select:none}
+#difftable thead th.ign{color:#AEB6BF; background:#E4E8EC; text-decoration:line-through}
+#difftable td.c-ign{background:#F1F3F5; color:#AEB6BF}
+#difftable td.c-ign span{color:inherit}
 .v-null{color:#AEB6BF; font-style:italic}
 .v-num{color:#1B2430}
 .v-date{color:#5A4CBF}
@@ -321,7 +325,7 @@ td.c-uncmp{color:var(--muted)}
 
   <p class="footnote">
     すべての処理はブラウザ内で完結し、ファイルは外部に送信されません。読み取り専用です。&nbsp;
-    差分は<b>キー列の値</b>で行を対応付け、共通列のセルを比較します（<code>A</code>/<code>B</code> バッジは片側のみの列）。&nbsp;
+    差分は<b>キー列の値</b>で行を対応付け、共通列のセルを比較します（<code>A</code>/<code>B</code> バッジは片側のみの列）。列見出しを<b>ダブルクリック</b>するとその列を無視（グレー表示・差分対象外）し、もう一度で戻ります。&nbsp;
     対応形式: Access 97〜2019（Jet3/Jet4/ACE）。古い Jet3 の日本語や暗号化DBは正しく読めない場合があります。
   </p>
 
@@ -359,6 +363,7 @@ td.c-uncmp{color:var(--muted)}
     sortDir: "asc",
     diffOnly: true,
     paper: "a3l",
+    ignore: {},         // テーブル名 → 差分対象外の列名配列
     result: null,
   };
   var pending = null; // Cookie復元用（ファイル読込後に適用）
@@ -376,7 +381,7 @@ td.c-uncmp{color:var(--muted)}
   /* ---------- 設定の保存 / 復元（Cookie + localStorage 保険） ---------- */
   function saveSettings() {
     var s = { paper: state.paper, diffOnly: state.diffOnly, sortCol: state.sortCol,
-      sortDir: state.sortDir, keyCols: state.keyCols, table: state.table };
+      sortDir: state.sortDir, keyCols: state.keyCols, table: state.table, ignore: state.ignore };
     var json = JSON.stringify(s);
     try { document.cookie = "accessdiff=" + encodeURIComponent(json) + ";path=/;max-age=31536000;samesite=lax"; } catch (e) {}
     try { window.localStorage.setItem("accessdiff", json); } catch (e) {}
@@ -577,6 +582,14 @@ td.c-uncmp{color:var(--muted)}
   }
 
   /* ---------- 差分計算 ---------- */
+  function ignoredCols() { return (state.table && state.ignore[state.table]) || []; }
+  function toggleIgnore(col) {
+    var list = ignoredCols().slice(), i = list.indexOf(col);
+    if (i >= 0) list.splice(i, 1); else list.push(col);
+    if (list.length) state.ignore[state.table] = list; else delete state.ignore[state.table];
+    compute();
+    saveSettings();
+  }
   function keyStringOf(row) { return state.keyCols.map(function (c) { return normForCompare(row[c]); }).join(SEP); }
 
   function compute() {
@@ -584,7 +597,8 @@ td.c-uncmp{color:var(--muted)}
     if (!state.table || !state.keyCols.length) return;
     var cols = commonColumns();
     var keyCols = state.keyCols;
-    var cmpCols = cols.common.filter(function (c) { return keyCols.indexOf(c) < 0; }); // 比較対象＝共通列−キー列
+    var ign = ignoredCols();
+    var cmpCols = cols.common.filter(function (c) { return keyCols.indexOf(c) < 0 && ign.indexOf(c) < 0; }); // 比較対象＝共通列−キー列−無視列
 
     var dataA = effA().reader.getTable(state.table).getData();
     var dataB = effB().reader.getTable(state.table).getData();
@@ -673,6 +687,8 @@ td.c-uncmp{color:var(--muted)}
       if (cols.onlyA.length) msgs.push("A のみの列: " + cols.onlyA.join(", "));
       if (cols.onlyB.length) msgs.push("B のみの列: " + cols.onlyB.join(", "));
       if (state.result.dupWarn) msgs.push("キーに重複があります（同キーは出現順で対応付け）。");
+      var ignNow = ignoredCols().filter(function (c) { return cols.all.indexOf(c) >= 0 && state.keyCols.indexOf(c) < 0; });
+      if (ignNow.length) msgs.push("差分対象外の列: " + ignNow.join(", "));
     }
     if (msgs.length) { warn.innerHTML = msgs.map(escapeHtml).join(" &nbsp;/&nbsp; "); warn.classList.remove("hidden"); }
     else warn.classList.add("hidden");
@@ -689,7 +705,9 @@ td.c-uncmp{color:var(--muted)}
       var badge = "";
       if (cols.onlyA.indexOf(col) >= 0) badge = " <span class=\"cbadge a\">A</span>";
       else if (cols.onlyB.indexOf(col) >= 0) badge = " <span class=\"cbadge b\">B</span>";
-      thead += "<th>" + escapeHtml(col) + badge + "</th>";
+      var ign = ignoredCols().indexOf(col) >= 0;
+      thead += "<th data-col=\"" + escapeHtml(col) + "\"" + (ign ? " class=\"ign\"" : "") +
+        " title=\"ダブルクリックで" + (ign ? "比較に戻す" : "差分対象外にする") + "\">" + escapeHtml(col) + badge + "</th>";
     });
     thead += "</tr>";
 
@@ -711,7 +729,8 @@ td.c-uncmp{color:var(--muted)}
 
     var host = $("tableHost");
     if (shown.length === 0) {
-      host.innerHTML = "<div class=\"empty\">" +
+      // 見出しは残す（無視列をダブルクリックで戻せるように）
+      host.innerHTML = "<table id=\"difftable\"><thead>" + thead + "</thead></table><div class=\"empty\">" +
         (!single && state.diffOnly ? "差分はありません。すべての行が一致しています。" : "表示する行がありません。") + "</div>";
     } else {
       host.innerHTML = "<table id=\"difftable\"><thead>" + thead + "</thead><tbody>" + frag.join("") + "</tbody></table>" +
@@ -726,6 +745,10 @@ td.c-uncmp{color:var(--muted)}
   }
   function renderCell(row, col, cols) {
     var comparable = cols.common.indexOf(col) >= 0;
+    if (ignoredCols().indexOf(col) >= 0) {
+      var s = row.b || row.a;
+      return "<td class=\"c-ign\">" + valSpan(s ? s[col] : undefined) + "</td>";
+    }
     if (row.status === "added") return "<td class=\"c-add\">" + valSpan(row.b ? row.b[col] : undefined) + "</td>";
     if (row.status === "removed") return "<td class=\"c-rem\">" + valSpan(row.a ? row.a[col] : undefined) + "</td>";
     if (comparable) {
@@ -781,6 +804,7 @@ td.c-uncmp{color:var(--muted)}
       if (s.paper && PAPER[s.paper]) state.paper = s.paper;
       if (typeof s.diffOnly === "boolean") state.diffOnly = s.diffOnly;
       if (s.sortDir === "asc" || s.sortDir === "desc") state.sortDir = s.sortDir;
+      if (s.ignore && typeof s.ignore === "object" && !Array.isArray(s.ignore)) state.ignore = s.ignore;
       pending = { table: s.table || null, keyCols: Array.isArray(s.keyCols) ? s.keyCols : [], sortCol: s.sortCol || "__key__" };
     }
 
@@ -794,6 +818,10 @@ td.c-uncmp{color:var(--muted)}
     $("diffOnly").addEventListener("change", function () { state.diffOnly = $("diffOnly").checked; if (state.result) render(); saveSettings(); });
     $("paperSel").addEventListener("change", function () { state.paper = $("paperSel").value; applyPaper(); saveSettings(); });
     $("pdfBtn").addEventListener("click", function () { window.print(); });
+    $("tableHost").addEventListener("dblclick", function (e) {
+      var th = e.target.closest && e.target.closest("#difftable thead th[data-col]");
+      if (th) toggleIgnore(th.getAttribute("data-col"));
+    });
 
     // キー列メニューの開閉
     $("keyBtn").addEventListener("click", function (e) { e.stopPropagation(); if ($("keyBtn").disabled) return; $("keyPop").classList.toggle("hidden"); });
