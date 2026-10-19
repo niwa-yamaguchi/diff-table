@@ -41,7 +41,7 @@ body{
 /* controls */
 .controls{
   background:var(--panel); border:1px solid var(--line); border-radius:10px;
-  margin-top:16px; padding:14px; position:sticky; top:10px; z-index:20;
+  margin-top:16px; padding:14px; position:relative; z-index:20;
   box-shadow:0 1px 2px rgba(20,30,45,.04);
 }
 .files{display:grid; grid-template-columns:1fr 1fr; gap:12px}
@@ -131,7 +131,7 @@ select:focus-visible, button:focus-visible, .drop:focus-visible{outline:2px soli
 }
 
 /* table */
-.tablehost{margin-top:16px; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:auto}
+.tablehost{margin-top:16px; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:auto; max-height:calc(100vh - 170px)} /* 下の注記ぶん引いて、最下部までスクロールしても見出しが画面内に残るように */
 .empty{padding:40px 20px; text-align:center; color:var(--muted); font-size:13px}
 .capnote{padding:10px 14px; font-size:12px; color:var(--chg-ink); border-top:1px solid var(--line); background:var(--chg-bg)}
 table#difftable{border-collapse:collapse; width:100%; font-family:var(--mono); font-size:12.5px}
@@ -145,7 +145,7 @@ table#difftable{border-collapse:collapse; width:100%; font-family:var(--mono); f
 }
 #difftable td.gut, #difftable td.keyc, #difftable th.gut, #difftable th.keyc{position:sticky}
 #difftable .gut{
-  width:26px; text-align:center; color:var(--muted); font-weight:700; padding-left:0; padding-right:0; left:0;
+  width:26px; min-width:26px; max-width:26px; text-align:center; color:var(--muted); font-weight:700; padding-left:0; padding-right:0; left:0;
 }
 #difftable .keyc{left:26px; font-weight:600}
 /* sticky セルは不透明（横スクロール時に後ろの値が透けないように） */
@@ -225,7 +225,7 @@ td.c-uncmp{color:var(--muted)}
   .printhead .pt{font-size:14px; font-weight:700; margin-bottom:4px}
   .printhead .pmeta{font-family:var(--mono); font-size:10px; color:#333; line-height:1.7}
   .printhead .pmeta b{color:#000}
-  .tablehost{border:none; border-radius:0; overflow:visible; margin-top:0}
+  .tablehost{border:none; border-radius:0; overflow:visible; max-height:none; margin-top:0}
   #difftable{font-size:9px}
   #difftable th,#difftable td{padding:2px 5px; white-space:normal; word-break:break-word}
   #difftable thead th{position:static; background:#EEE !important; -webkit-print-color-adjust:exact; print-color-adjust:exact}
